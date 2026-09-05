@@ -1,22 +1,27 @@
 // ─────────────────────────────────────────────────────────────
 // js/leave-requests.js — หน้าที่ 1 รายการใบลา
-// สัปดาห์ที่ 6: อ่านจากฐานข้อมูลจริง (Firestore) แทนข้อมูลปลอมใน js/data.js
+// สัปดาห์ที่ 6-7: อ่านจากฐานข้อมูลจริง (Firestore) แทนข้อมูลปลอมใน js/data.js
+// ต้องล็อกอินก่อนถึงเปิดหน้านี้ได้ (js/auth-guard.js)
 // ─────────────────────────────────────────────────────────────
 
 import { db } from "./firebase-init.js";
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { ต้องล็อกอิน } from "./auth-guard.js";
 
 (async function () {
+  var ผู้ใช้ = await ต้องล็อกอิน();
+  if (!ผู้ใช้) return;   // ต้องล็อกอิน() ได้ redirect ไปหน้าล็อกอินแล้ว
+
   var กล่อง = document.getElementById("ผลลัพธ์");
 
   // ชื่อไฟล์ (doc.id) บน Firestore คือ id ของใบลา ไม่ได้เก็บซ้ำเป็น field ข้างใน
-  var รายการจากFirestore = (await getDocs(collection(db, "leaveRequests")))
+  var ใบลาทั้งหมด = (await getDocs(collection(db, "leaveRequests")))
     .docs.map(function (doc) { return Object.assign({ id: doc.id }, doc.data()); });
 
-  // ใบลาจาก Firestore บวกกับใบที่เพิ่งยื่นในหน้าถัดไป
-  // (การเขียนลง Firestore จริงยังไม่ทำสัปดาห์นี้ ใบที่ยื่นใหม่จึงหายเมื่อปิดเบราว์เซอร์)
-  var ใบลาที่ยื่นใหม่ = JSON.parse(sessionStorage.getItem("ใบลาที่ยื่นใหม่") || "[]");
-  var ใบลาทั้งหมด = รายการจากFirestore.concat(ใบลาที่ยื่นใหม่);
+  // พนักงานเห็นเฉพาะใบของตัวเอง ตาม ACL.md — หัวหน้า/ฝ่ายบุคคลเห็นทุกใบ
+  if (ผู้ใช้.role === "employee") {
+    ใบลาทั้งหมด = ใบลาทั้งหมด.filter(function (ใบ) { return ใบ.requesterId === ผู้ใช้.uid; });
+  }
 
   // ถ้ามีสถานะติดมาท้าย URL ให้กรองเฉพาะสถานะนั้น
   var สถานะที่กรอง = ค่าจากURL("status");

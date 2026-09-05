@@ -4,7 +4,7 @@
   "private": true,
   "description": "LeaveEasy — จุดเริ่มต้นของใบงาน ADT-RAISE Batch 2 Module 2",
   "scripts": {
-    "dev": "serve -l 3000 ."
+    "dev": "serve ."
   },
   "devDependencies": {
     "firebase": "^12.18.0",
