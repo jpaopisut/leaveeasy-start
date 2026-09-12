@@ -272,9 +272,12 @@ users (ผู้ใช้)         ── 1:N ──►  leave_requests (ใบ�
               requesterId,  requesterName,   ← จดชื่อซ้ำไว้เลย
               approverId,   approverName,    ← จดชื่อซ้ำไว้เลย
               leaveTypeId,  leaveTypeName,   ← จดชื่อซ้ำไว้เลย
-              startDate, endDate, createdAt }
+              startDate, endDate, createdAt,
+              aiSuggestion }                 ← 🤖 เพิ่มสัปดาห์ที่ 8
       📁 approvals/                          ← โฟลเดอร์ย่อยที่ซ้อนอยู่ในไฟล์ lr001
          📄 ap001 { authorId, authorName, message, createdAt }
+      📁 aiLog/                              ← โฟลเดอร์ย่อยที่ซ้อนอยู่ในไฟล์ lr001 · เพิ่มสัปดาห์ที่ 8
+         📄 (auto-id) { input, output, createdAt }   ← บันทึกทุกครั้งที่เรียก AI
 ```
 
 > ⚠️ **ชื่อโฟลเดอร์บน Firestore เขียนติดกันแบบไม่มีขีดล่าง** — ตาราง `leave_requests` กลายเป็นโฟลเดอร์ `leaveRequests` และ `leave_types` กลายเป็น `leaveTypes`
@@ -310,11 +313,15 @@ users (ผู้ใช้)         ── 1:N ──►  leave_requests (ใบ�
 | | `leaveTypeId` | ข้อความ | ชื่อไฟล์ของประเภทการลาในโฟลเดอร์ `leaveTypes` |
 | | `leaveTypeName` | ข้อความ | 🔁 **จดซ้ำ** — ชื่อประเภทการลา |
 | | `createdAt` | วันเวลา | วันเวลาที่ยื่นใบลา |
+| | `aiSuggestion` | ข้อความ | 🤖 สรุปที่ AI เขียนให้หัวหน้าอ่านก่อนกดอนุมัติ — **เพิ่มในสัปดาห์ที่ 8** ไม่มีค่าจนกว่าจะมีคนกดปุ่มสรุป |
 | | `attachmentUrl` | ข้อความ | ลิงก์เอกสารที่แนบ — **เพิ่มในสัปดาห์ที่ 9** |
 | `approvals` | `authorId` | ข้อความ | ชื่อไฟล์ของผู้เขียนในโฟลเดอร์ `users` |
 | | `authorName` | ข้อความ | 🔁 **จดซ้ำ** — ชื่อผู้เขียน |
 | | `message` | ข้อความ | ข้อความความเห็น |
 | | `createdAt` | วันเวลา | วันเวลาที่เขียน |
+| `aiLog` | `input` | ข้อความ | 🤖 ข้อความที่ส่งไปให้ AI ตอนกดปุ่มสรุป — **เพิ่มในสัปดาห์ที่ 8** |
+| | `output` | ข้อความ | 🤖 คำตอบที่ AI ส่งกลับมา (หรือข้อความ error ถ้าเรียกไม่สำเร็จ) |
+| | `createdAt` | วันเวลา | วันเวลาที่เรียก AI — บันทึกทุกครั้งที่กดปุ่ม ไม่ว่าจะสำเร็จหรือไม่ |
 
 ### 5.3 ข้อมูลที่จดซ้ำไว้ (denormalize) และเหตุผล
 

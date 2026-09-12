@@ -45,6 +45,7 @@ All Firestore collections ("folders") in this project — there are no others, d
 | `leaveTypes` | `lt001`, `lt002`, `lt003` | `name` |
 | `leaveRequests` | `lr001` … | the main collection; see §5.2 of the spec for full fields |
 | `leaveRequests/{id}/approvals` | `ap001` … | subcollection nested under each leave request, not top-level |
+| `leaveRequests/{id}/aiLog` | auto-id | subcollection logging every AI call made against that request (`input`, `output`, `createdAt`) — added week 8, see [js/leave-request-detail.js](js/leave-request-detail.js) |
 
 Full field-by-field reference is in `leaveeasy-spec.md` §5. Key points to keep in mind when touching this data:
 

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>ทดสอบ AI ผ่าน OpenRouter — LeaveEasy</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="nav"></div>
+<div class="container">
+  <h1>ทดสอบ AI ผ่าน OpenRouter</h1>
+  <p class="subtitle">หน้าทดสอบส่วนตัว — ไม่ได้เชื่อมกับเมนูหลักหรือฐานข้อมูล ใช้แค่ลองยิง API เล่น ๆ</p>
+
+  <div class="card">
+    <label for="apiKey">OpenRouter API key</label>
+    <input type="password" id="apiKey" placeholder="sk-or-v1-...">
+    <p class="hint">
+      คีย์นี้ถูกเก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น (localStorage) ไม่ถูกเขียนลงไฟล์โปรเจกต์และไม่ถูก commit ขึ้น Git —
+      ต้องกรอกเองทุกเครื่องที่เปิดหน้านี้
+    </p>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+      <input type="checkbox" id="rememberKey" style="width:auto;">
+      จำคีย์ไว้ในเบราว์เซอร์นี้
+    </label>
+
+    <div class="btn-row">
+      <button id="sendBtn">ส่งข้อความ "สวัสดี"</button>
+    </div>
+
+    <div id="result"></div>
+  </div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/nav.js"></script>
+<script type="module" src="js/nav-user.js"></script>
+<script>
+const MODEL = "google/gemini-2.5-flash-lite";
+const STORAGE_KEY = "leaveeasy_openrouter_key";
+
+const apiKeyInput = document.getElementById("apiKey");
+const rememberBox = document.getElementById("rememberKey");
+const sendBtn = document.getElementById("sendBtn");
+const resultBox = document.getElementById("result");
+
+try {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    apiKeyInput.value = saved;
+    rememberBox.checked = true;
+  }
+} catch (e) {}
+
+sendBtn.addEventListener("click", async () => {
+  const key = apiKeyInput.value.trim();
+  if (!key) {
+    resultBox.innerHTML = `<div class="alert alert-error">กรุณากรอก API key ก่อน</div>`;
+    return;
+  }
+
+  try {
+    if (rememberBox.checked) localStorage.setItem(STORAGE_KEY, key);
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {}
+
+  sendBtn.disabled = true;
+  sendBtn.textContent = "กำลังส่ง...";
+  resultBox.innerHTML = "";
+
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: "user", content: "สวัสดี" }]
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      const msg = data?.error?.message || `HTTP ${res.status}`;
+      resultBox.innerHTML = `<div class="alert alert-error">เรียก API ไม่สำเร็จ: ${esc(msg)}</div>`;
+      return;
+    }
+
+    const reply = data?.choices?.[0]?.message?.content ?? "(ไม่มีข้อความตอบกลับ)";
+    resultBox.innerHTML = `<div class="alert alert-ai"><strong>คำตอบจาก ${esc(MODEL)}:</strong><br>${esc(reply)}</div>`;
+  } catch (err) {
+    resultBox.innerHTML = `<div class="alert alert-error">เกิดข้อผิดพลาด: ${esc(err.message)}</div>`;
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = `ส่งข้อความ "สวัสดี"`;
+  }
+});
+</script>
+</body>
+</html>

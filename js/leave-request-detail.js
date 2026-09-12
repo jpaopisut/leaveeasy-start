@@ -11,8 +11,10 @@
 // ─────────────────────────────────────────────────────────────
 
 import { db } from "./firebase-init.js";
-import { doc, getDoc, collection, getDocs, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { doc, getDoc, collection, getDocs, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { ต้องล็อกอิน } from "./auth-guard.js";
+
+var โมเดลAI = "google/gemini-2.5-flash-lite";
 
 (async function () {
   var ผู้ใช้ = await ต้องล็อกอิน();
@@ -76,6 +78,11 @@ import { ต้องล็อกอิน } from "./auth-guard.js";
       return '<div class="field-row"><span class="k">' + r[0] + "</span><span>" + r[1] + "</span></div>";
     }).join("");
 
+    // สรุปโดย AI (ถ้าเคยกดสรุปไว้แล้ว) — โชว์ให้ทุกคนที่เปิดดูใบนี้ได้เห็น เหมือนแถวข้อมูลอื่น
+    if (ใบ.aiSuggestion) {
+      html += '<div class="alert alert-ai"><strong>🤖 สรุปโดย AI:</strong> ' + esc(ใบ.aiSuggestion) + "</div>";
+    }
+
     // อนุมัติ/ไม่อนุมัติ เฉพาะหัวหน้า/ฝ่ายบุคคล (ตาม ACL.md) · ลบใบลา อิงความเป็นเจ้าของ ไม่อิง role
     var ยังรอพิจารณา = ใบ.status === "รอพิจารณา";
     var เปลี่ยนสถานะได้ = ยังรอพิจารณา && (ผู้ใช้.role === "manager" || ผู้ใช้.role === "hr");
@@ -86,7 +93,8 @@ import { ต้องล็อกอิน } from "./auth-guard.js";
       if (เปลี่ยนสถานะได้) {
         html +=
           '<button type="button" class="btn-ok" id="ปุ่มอนุมัติ">อนุมัติ</button>' +
-          '<button type="button" class="btn-danger" id="ปุ่มไม่อนุมัติ">ไม่อนุมัติ</button>';
+          '<button type="button" class="btn-danger" id="ปุ่มไม่อนุมัติ">ไม่อนุมัติ</button>' +
+          '<button type="button" class="btn-ghost" id="ปุ่มสรุปAI">🤖 ' + (ใบ.aiSuggestion ? "สรุปใหม่อีกครั้ง" : "ให้ AI ช่วยสรุป") + "</button>";
       }
       if (ลบได้) {
         html += '<button type="button" class="btn-danger" id="ปุ่มลบใบลา">ลบใบลา</button>';
@@ -98,14 +106,129 @@ import { ต้องล็อกอิน } from "./auth-guard.js";
       html += '<p class="hint">ใบนี้พิจารณาแล้ว จึงเปลี่ยนสถานะต่อไม่ได้</p>';
     }
 
+    if (เปลี่ยนสถานะได้) {
+      html += '<div id="ผลลัพธ์สรุปAI" class="hidden"></div>';
+    }
+
     กล่องใบลา.innerHTML = html;
 
     if (เปลี่ยนสถานะได้) {
       document.getElementById("ปุ่มอนุมัติ").addEventListener("click", function () { เปลี่ยนสถานะ("อนุมัติ"); });
       document.getElementById("ปุ่มไม่อนุมัติ").addEventListener("click", function () { เปลี่ยนสถานะ("ไม่อนุมัติ"); });
+      document.getElementById("ปุ่มสรุปAI").addEventListener("click", สรุปด้วยAI);
     }
     if (ลบได้) {
       document.getElementById("ปุ่มลบใบลา").addEventListener("click", ลบใบลา);
+    }
+  }
+
+  // ── สรุปใบลาด้วย AI ให้หัวหน้าอ่านก่อนอนุมัติ (เขียน field aiSuggestion กลับ Firestore) ──
+  function สรุปด้วยAI() {
+    var ปุ่ม = document.getElementById("ปุ่มสรุปAI");
+    var กล่องผล = document.getElementById("ผลลัพธ์สรุปAI");
+
+    var คีย์ = window.OPENROUTER_API_KEY;
+    if (!คีย์) {
+      แสดงผลสรุป("error", "ยังไม่ได้ตั้งค่าคีย์ OpenRouter — สร้างไฟล์ js/ai-config.local.js ก่อน (ดู .gitignore)");
+      return;
+    }
+
+    var ข้อความปุ่มปกติ = ปุ่ม.textContent;
+    ปุ่ม.disabled = true;
+    ปุ่ม.textContent = "กำลังสรุป...";
+    แสดงผลสรุป(null, "");
+
+    var inputข้อความ = "ผู้ขอลา: " + ใบ.requesterName + "\n" +
+      "ประเภทการลา: " + ใบ.leaveTypeName + "\n" +
+      "ช่วงวันที่: " + ใบ.startDate + " ถึง " + ใบ.endDate + "\n" +
+      "หัวข้อ: " + ใบ.title + "\n" +
+      "เหตุผล: " + ใบ.reason;
+
+    fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + คีย์,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: โมเดลAI,
+        messages: [
+          {
+            role: "system",
+            content: "คุณช่วยสรุปใบลาให้หัวหน้าอ่านก่อนตัดสินใจอนุมัติ ตอบเป็นภาษาไทย 1-2 ประโยคสั้น ๆ กระชับ " +
+              "บอกว่าใครลา ลาประเภทไหน ช่วงไหน เพราะอะไร ห้ามใส่คำนำหรือคำลงท้าย ตอบแต่เนื้อหาสรุปเท่านั้น"
+          },
+          { role: "user", content: inputข้อความ }
+        ]
+      })
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          return { ok: res.ok, status: res.status, data: data };
+        });
+      })
+      .then(function (ผลลัพธ์) {
+        if (!ผลลัพธ์.ok) {
+          var ข้อความ = (ผลลัพธ์.data && ผลลัพธ์.data.error && ผลลัพธ์.data.error.message) || ("HTTP " + ผลลัพธ์.status);
+          บันทึกล็อก(inputข้อความ, "(เรียกไม่สำเร็จ) " + ข้อความ);
+          แสดงผลสรุป("error", "เรียก AI ไม่สำเร็จ: " + ข้อความ);
+          คืนปุ่ม();
+          return;
+        }
+
+        var สรุป = ((ผลลัพธ์.data.choices && ผลลัพธ์.data.choices[0] && ผลลัพธ์.data.choices[0].message.content) || "").trim();
+        if (!สรุป) {
+          บันทึกล็อก(inputข้อความ, "(ไม่มีข้อความตอบกลับ)");
+          แสดงผลสรุป("error", "AI ไม่ได้ตอบข้อความกลับมา ลองใหม่อีกครั้ง");
+          คืนปุ่ม();
+          return;
+        }
+
+        บันทึกล็อก(inputข้อความ, สรุป);
+
+        // อัปเดตสำเร็จ: วาดใบลา() ใหม่จะสร้างปุ่มขึ้นมาแทนพร้อมข้อความที่ถูกต้องอยู่แล้ว
+        // (ไม่ต้อง คืนปุ่ม() ตรงนี้ ไม่งั้นจะไปทับข้อความปุ่มเดิมที่ วาดใบลา() เพิ่งตั้งใหม่)
+        return updateDoc(doc(db, "leaveRequests", ใบ.id), { aiSuggestion: สรุป })
+          .then(function () {
+            ใบ.aiSuggestion = สรุป;
+            วาดใบลา();
+          })
+          .catch(function (err) {
+            แสดงผลสรุป("error", "บันทึกสรุปไม่สำเร็จ: " + err.message);
+            คืนปุ่ม();
+          });
+      })
+      .catch(function (err) {
+        บันทึกล็อก(inputข้อความ, "(เรียกไม่สำเร็จ) " + err.message);
+        แสดงผลสรุป("error", "เกิดข้อผิดพลาด: " + err.message);
+        คืนปุ่ม();
+      });
+
+    // บันทึกทุกครั้งที่เรียก AI ไม่ว่าจะสำเร็จหรือไม่ — เป็น audit log แยกจากการเขียน aiSuggestion
+    // เขียนแบบ fire-and-forget ไม่บล็อก UI หลัก ถ้าบันทึกล็อกไม่สำเร็จก็แค่เตือนใน console
+    function บันทึกล็อก(input, output) {
+      addDoc(collection(db, "leaveRequests", ใบ.id, "aiLog"), {
+        input: input,
+        output: output,
+        createdAt: เวลาตอนนี้()
+      }).catch(function (err) {
+        console.warn("บันทึก aiLog ไม่สำเร็จ:", err.message);
+      });
+    }
+
+    function คืนปุ่ม() {
+      ปุ่ม.disabled = false;
+      ปุ่ม.textContent = ข้อความปุ่มปกติ;
+    }
+
+    function แสดงผลสรุป(ประเภท, ข้อความ) {
+      if (!ข้อความ) {
+        กล่องผล.classList.add("hidden");
+        กล่องผล.textContent = "";
+        return;
+      }
+      กล่องผล.className = "alert " + (ประเภท === "error" ? "alert-error" : "alert-ai");
+      กล่องผล.textContent = ข้อความ;
     }
   }
 
