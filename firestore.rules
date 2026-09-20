@@ -1,15 +1,91 @@
 rules_version = '2';
 
-// กฎขั้นต่ำของสัปดาห์ที่ 7 — กฎข้อเดียว: "ต้องล็อกอินก่อน ถึงจะอ่าน/เขียนอะไรก็ได้"
-// ครอบทุก collection ในฐานข้อมูล (leaveRequests, approvals, leaveTypes, users, และ
-// collection ใหม่ที่อาจเพิ่มทีหลัง) ด้วย match แบบ wildcard เดียว ไม่ต้องแยกเขียนทีละ collection
+// กฎรายห้องของสัปดาห์ที่ 8 — อิงตารางสิทธิ์ใน ACL.md ทุกโฟลเดอร์รวมโฟลเดอร์ย่อย approvals/aiLog
+// จุดสำคัญที่เปลี่ยนจากสัปดาห์ที่ 7: พนักงานอ่านใบลาของคนอื่นไม่ได้อีกต่อไป แม้เรียก
+// Firestore SDK ตรงๆ ผ่าน DevTools ข้ามหน้าเว็บไปเลยก็ตาม (ก่อนหน้านี้เป็นแค่ UI กัน)
 //
-// ยังไม่มีการเช็ครายบุคคล/รายบทบาท (เช่น employee เห็นแค่ใบของตัวเอง, ลบได้เฉพาะเจ้าของ)
-// นั่นคือกฎรายห้องของสัปดาห์ที่ 8 — ตอนนี้ใครก็ตามที่ล็อกอินแล้ว อ่าน/เขียนได้ทุกเอกสาร
+// หมายเหตุ: ภาษากฎของ Firestore (CEL) ไม่รองรับชื่อ function เป็นภาษาไทยเหมือน JS ปกติ
+// (deploy แล้วขึ้น token recognition error) จึงตั้งชื่อ function เป็นภาษาอังกฤษแทน
+// ต่างจากไฟล์ .js ในโปรเจกต์นี้ที่ตั้งชื่อฟังก์ชันเป็นภาษาไทยได้ปกติ — คอมเมนต์ยังคงเป็นไทยตามธรรมเนียมโปรเจกต์
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isManagerOrHr() {
+      return isSignedIn() && (myRole() == "manager" || myRole() == "hr");
+    }
+
+    function isHr() {
+      return isSignedIn() && myRole() == "hr";
+    }
+
+    // ── users — อ่าน/สร้างได้เฉพาะเอกสารของตัวเอง (auth-guard อ่าน role ตัวเอง, signup สร้างของตัวเอง) ──
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      // สมัครสมาชิกใหม่ role ต้องเป็น employee เสมอ ตาม spec US-08 — ห้ามสมัครแล้วตั้งตัวเองเป็น manager/hr
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.role == "employee";
+      allow update, delete: if false;   // ยังไม่มีหน้าจอแก้ไขโปรไฟล์/role ในสัปดาห์นี้
+    }
+
+    // ── leaveTypes — ทุกคนที่ล็อกอินอ่านได้ (ต้องใช้เลือกตอนยื่นใบลา) แก้ได้เฉพาะ hr ──
+    match /leaveTypes/{typeId} {
+      allow read: if isSignedIn();
+      allow write: if isHr();
+    }
+
+    // ── leaveRequests — ใบหลัก ──
+    match /leaveRequests/{requestId} {
+      // เห็นใบของตัวเอง หรือเป็นหัวหน้า/ฝ่ายบุคคลเห็นทุกใบ (ตาม ACL.md)
+      allow read: if isSignedIn() &&
+                  (resource.data.requesterId == request.auth.uid || isManagerOrHr());
+
+      // สร้างใบใหม่ได้เฉพาะของตัวเอง และต้องเริ่มที่สถานะรอพิจารณาเสมอ
+      allow create: if isSignedIn() &&
+                    request.resource.data.requesterId == request.auth.uid &&
+                    request.resource.data.status == "รอพิจารณา";
+
+      // แก้ไขได้เฉพาะหัวหน้า/ฝ่ายบุคคล และแก้ได้แค่ 2 ช่องนี้เท่านั้น (เปลี่ยนสถานะ / เขียนสรุป AI)
+      // เปลี่ยนสถานะได้เฉพาะตอนยังรอพิจารณาอยู่ และเปลี่ยนไปได้แค่ อนุมัติ/ไม่อนุมัติ (ตามหัวข้อ 6)
+      allow update: if isManagerOrHr() && (
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"]) &&
+                       resource.data.status == "รอพิจารณา" &&
+                       (request.resource.data.status == "อนุมัติ" || request.resource.data.status == "ไม่อนุมัติ"))
+                      ||
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(["aiSuggestion"])
+                    );
+
+      // ลบได้เฉพาะเจ้าของใบเอง และเฉพาะตอนยังรอพิจารณาอยู่ (อิงความเป็นเจ้าของ ไม่อิง role — ตาม ACL.md)
+      allow delete: if isSignedIn() &&
+                    resource.data.requesterId == request.auth.uid &&
+                    resource.data.status == "รอพิจารณา";
+
+      // ── approvals — ความเห็นการอนุมัติ มองเห็นได้เท่ากับตัวใบลาแม่ ──
+      match /approvals/{approvalId} {
+        allow read: if isSignedIn() &&
+                    (get(/databases/$(database)/documents/leaveRequests/$(requestId)).data.requesterId == request.auth.uid ||
+                     isManagerOrHr());
+
+        // เขียนความเห็นได้: เจ้าของใบเขียนความเห็นในใบตัวเอง หรือหัวหน้า/ฝ่ายบุคคลเขียนได้ทุกใบ
+        allow create: if isSignedIn() &&
+                      request.resource.data.authorId == request.auth.uid &&
+                      (get(/databases/$(database)/documents/leaveRequests/$(requestId)).data.requesterId == request.auth.uid ||
+                       isManagerOrHr());
+
+        allow update, delete: if false;   // ยังไม่มีการแก้/ลบความเห็นในสัปดาห์นี้
+      }
+
+      // ── aiLog — log การเรียก AI สรุปใบลา เฉพาะหัวหน้า/ฝ่ายบุคคล (คนเดียวกับที่กดปุ่มสรุป AI ได้) ──
+      match /aiLog/{logId} {
+        allow read, write: if isManagerOrHr();
+      }
     }
   }
 }

@@ -18,6 +18,9 @@ desktop.ini
 .vscode/
 .idea/
 
+# ไฟล์ trace/screenshot ที่ Playwright MCP สร้างเองตอนรันเทสต์ (สัปดาห์ที่ 9)
+.playwright-mcp/
+
 
 # ── ไฟล์ตั้งค่าและไฟล์ที่มีคีย์/รหัสลับ (ห้ามส่งขึ้น GitHub เด็ดขาด) ──
 # ตัวแปรแวดล้อม / .env ทุกแบบ

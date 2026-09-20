@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { db } from "./firebase-init.js";
-import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { ต้องล็อกอิน } from "./auth-guard.js";
 
 (async function () {
@@ -14,14 +14,17 @@ import { ต้องล็อกอิน } from "./auth-guard.js";
 
   var กล่อง = document.getElementById("ผลลัพธ์");
 
-  // ชื่อไฟล์ (doc.id) บน Firestore คือ id ของใบลา ไม่ได้เก็บซ้ำเป็น field ข้างใน
-  var ใบลาทั้งหมด = (await getDocs(collection(db, "leaveRequests")))
-    .docs.map(function (doc) { return Object.assign({ id: doc.id }, doc.data()); });
-
   // พนักงานเห็นเฉพาะใบของตัวเอง ตาม ACL.md — หัวหน้า/ฝ่ายบุคคลเห็นทุกใบ
-  if (ผู้ใช้.role === "employee") {
-    ใบลาทั้งหมด = ใบลาทั้งหมด.filter(function (ใบ) { return ใบ.requesterId === ผู้ใช้.uid; });
-  }
+  // ต้อง query ด้วย where("requesterId", ...) ตั้งแต่ต้นสำหรับพนักงาน ไม่ใช่ getDocs ทั้งหมดแล้วมากรองทีหลัง
+  // เพราะ Firestore Security Rules สัปดาห์ที่ 8 เช็คสิทธิ์เป็นรายเอกสารตาม query — ถ้า query ไม่มี
+  // where จำกัดเจ้าของ Firestore จะปฏิเสธทั้ง query ทันทีสำหรับ role ที่ไม่ใช่หัวหน้า/ฝ่ายบุคคล
+  var คำค้น = ผู้ใช้.role === "employee"
+    ? query(collection(db, "leaveRequests"), where("requesterId", "==", ผู้ใช้.uid))
+    : collection(db, "leaveRequests");
+
+  // ชื่อไฟล์ (doc.id) บน Firestore คือ id ของใบลา ไม่ได้เก็บซ้ำเป็น field ข้างใน
+  var ใบลาทั้งหมด = (await getDocs(คำค้น))
+    .docs.map(function (doc) { return Object.assign({ id: doc.id }, doc.data()); });
 
   // ถ้ามีสถานะติดมาท้าย URL ให้กรองเฉพาะสถานะนั้น
   var สถานะที่กรอง = ค่าจากURL("status");
